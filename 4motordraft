@@ -1,0 +1,168 @@
+//Last Edit: 2/10/18
+
+#include <Stepper.h>
+#include <Wire.h>
+#include <Adafruit_MotorShield.h>
+#include "utility/Adafruit_MS_PWMServoDriver.h"
+
+// Create the motor shield object with the default I2C address
+Adafruit_MotorShield AFMS = Adafruit_MotorShield();
+
+// Connect a stepper motor with 200 steps per revolution (1.8 degree)
+// to motor ports #1 & #2 (M3 and M4)
+Adafruit_StepperMotor *NamaariMotor = AFMS.getStepper(200, 1);
+Adafruit_StepperMotor *SamMotor = AFMS.getStepper(200, 2);
+Adafruit_StepperMotor *HamMotor = AFMS.getStepper(200, 3);
+Adafruit_StepperMotor *ScampiMotor = AFMS.getStepper(200, 4);
+
+int piezoPin = 2;
+int SkipPin = 4;
+int FeedPin = 5;
+int WaitingPin = 6;
+int WitheringPin = 7;
+boolean ButtonPress = false;
+unsigned long DelayDuration = 30000; //This is where delay time is set. During testing it will be 30 seconds (30000), final should be 12 hours (43200000) or 11 hours, 59 minutes, and 30 seconds (43170000) to account for the time to dispense and initially reset the arduino at the end of normal feeding time, say, 8pm
+
+
+
+
+void setup()
+{
+AFMS.begin(); // create with the default frequency 1.6KHz
+//AFMS.begin(1000); // OR with a different frequency, say 1KHz
+
+NamaariMotor->setSpeed(600); // 600 rpm
+SamMotor->setSpeed(600); // 600 rpm
+HamMotor->setSpeed(600); // 600 rpm
+ScampiMotor->setSpeed(600); // 600 rpm
+
+pinMode(FeedPin, INPUT_PULLUP);
+pinMode(SkipPin, INPUT_PULLUP);
+pinMode(WaitingPin, OUTPUT);
+pinMode(WitheringPin, OUTPUT);
+}
+
+//declare dispense function
+void Dispense()
+{
+//*Tone needs 2 arguments, but can take three
+//1) Pin#
+//2) Frequency - this is in hertz (cycles per second) which determines the pitch of the noise made
+//3) Duration - how long the tone plays
+tone(piezoPin, 523.25, 1000);
+delay(500);
+tone(piezoPin, 523.25, 600);
+delay(500);
+tone(piezoPin, 698.46, 3000);
+delay(2000);
+
+float NamaariPosition = 0.0;
+float SamPosition = 0.0;
+float HamPosition = 0.0;
+float ScampiPosition = 0.0;
+//set increments according to a fraction of Sam rotations out of Namaari rotations. This is where difference in amount of food is determined!
+float NamaariIncrement = 100.0/100.0; // Full speed
+float SamIncrement = 50.0/100.0; // 1/2 speed (since she gets half as much food)
+float HamIncrement = 50.0/100.0; // 
+float ScampiIncrement = 50.0/100.0; // 
+
+//If you just want to spin the motors sequentially
+//    SamMotor->step(90, BACKWARD, DOUBLE);
+//    SamMotor->step(2200, FORWARD, DOUBLE);
+//    NamaariMotor->step(90, BACKWARD, DOUBLE);
+//    NamaariMotor->step(2200, FORWARD, DOUBLE);
+
+//don't forget to set the 'less than' value of i to whatever dispenses the correct amount for Namaari, then adjust the percentage for Sam. This is where the total number of increments is set. E.g. Namaari will turn a total of 60 full increments, while Sam will theoretically move 15 increments. 60 is about 9 rotations at 100%
+for(int i=0; i<80; i++)
+{
+NamaariPosition += NamaariIncrement;
+SamPosition += SamIncrement;
+HamPosition += HamIncrement;
+ScampiPosition += ScampiIncrement;
+  
+NamaariMotor->step(NamaariPosition, FORWARD, DOUBLE);
+SamMotor->step(SamPosition, FORWARD, DOUBLE);
+HamMotor->step(HamPosition, FORWARD, DOUBLE);
+ScampiMotor->step(ScampiPosition, FORWARD, DOUBLE);
+}
+NamaariMotor->release(); // stop rotation and turn off holding torque. 
+SamMotor->release();
+HamMotor->release();
+ScampiMotor->release();
+
+}
+
+//declare button check function
+void checkButtons()
+{
+  int  FeedButtonState = digitalRead(FeedPin);
+  int  SkipButtonState = digitalRead(SkipPin);
+
+  if(FeedButtonState == LOW)
+  {
+    delay(100);
+    ButtonPress = true;
+    Dispense();
+  }  
+
+  if(SkipButtonState == LOW)
+  {
+    
+tone(piezoPin, 392, 2000);
+delay(500);
+tone(piezoPin, 370, 2000);
+delay(500);
+tone(piezoPin, 349, 2000);
+delay(500);
+tone(piezoPin, 329.63, 3000);
+delay(100);
+    ButtonPress = true;
+  } 
+}
+
+
+
+//declare delay function
+void myDelay()
+{  
+  unsigned long StartOfDelay = millis();
+  unsigned long WitheringHour = DelayDuration * .75;
+
+  //Subtract current total duration from duration at start of delay. Keep running the check buttons function while the difference is less than the delay duration
+  while (millis() - StartOfDelay <=DelayDuration) {
+    checkButtons();  // check the buttons
+    
+  //Controls LEDs only during the last 3 hours
+  if (millis() - StartOfDelay > WitheringHour) {
+  switch (ButtonPress) {
+case false:
+digitalWrite(WitheringPin, HIGH);
+digitalWrite(WaitingPin, LOW);
+break;
+case true:
+digitalWrite(WitheringPin, LOW);
+digitalWrite(WaitingPin, HIGH);
+break;
+default:
+digitalWrite(WitheringPin, HIGH);
+digitalWrite(WaitingPin, HIGH);
+break;
+}
+    
+    }
+  }
+}
+
+void loop()
+{
+// your loop code here
+ButtonPress = false;
+digitalWrite(WitheringPin, LOW);
+digitalWrite(WaitingPin, HIGH);
+myDelay(); // call a new delay function that both delays and checks the button states. 
+
+if (ButtonPress == false)
+{
+Dispense();
+}
+}
